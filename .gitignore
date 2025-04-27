@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Mac system files
+.DS_Store
+
+# VSCode settings (optional)
+.vscode/
+
+# Test coverage reports
+htmlcov/
+.coverage
+
+# Python metadata
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter Notebook checkpoints (if you use notebooks)
+.ipynb_checkpoints/
