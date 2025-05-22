@@ -1,12 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from scipy.signal import savgol_filter
+from scipy.interpolate import PchipInterpolator
+from scipy.integrate import cumulative_trapezoid
 
 from rotation_matrix_algorithm import *
 from differential_geometry import *
 from storing_saving_formatting import *
 
-def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path):
+def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  3):
     """
     Calculate the pulse sequence with given max_amplitude and time_per_subpulse (tau) from space-curve and save the data in a new sub directory of dir_path
     Parameters:
@@ -18,30 +21,101 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path):
     - pulse sequence (np.array): A pulse sequence as n x 2 array (1. column: percentage of max_amp, 2. column: phase)
     - works best for big m (smooth curves)
     """
+    
+    bool_integrated_torsion = 0
     dir_path = get_next_subdirectory(dir_path)
-    len_scale = 0.9     #test what works best (usually between 0.1 and 4)
-    N1 = round(len(curve[:,1])*len_scale)
     required_max_curvature = 2*np.pi*max_amplitude
-    # Use arc length as new parameter for curvature and torsion calculation
-    curve_repara, arc_array, curvature, torsion = reparametrize_and_calc_curvature_and_torsion(curve, N1)
-    print("step 1/3 done")
 
-    # Normalize curvature for pulse sequence
-    curve_max_curvature = np.max(curvature)
-    N2 = round(arc_array[-1]*curve_max_curvature / (required_max_curvature*tau))
-    curve_repara, arc_array, _, _ = reparametrize_and_calc_curvature_and_torsion(curve*curve_max_curvature / required_max_curvature, N2)
-    length = len(arc_array)
+    if (Version == 1):
+        len_scale = 0.9     #test what works best (usually between 0.1 and 4)
+        N1 = round(len(curve[:,1])*len_scale)
+        # Use arc length as new parameter for curvature and torsion calculation
+        curve_repara, arc_array, curvature, torsion = reparametrize_and_calc_curvature_and_torsion(curve, N1)
+        print("step 1/3 done")
 
-    interp_curv_fun = interp1d(np.linspace(0,1,len(curvature)), curvature * required_max_curvature / curve_max_curvature, kind='linear', fill_value="extrapolate")
-    curvature = interp_curv_fun(np.linspace(0,1,length))
-    interp_tors_fun = interp1d(np.linspace(0,1,len(torsion)), torsion * required_max_curvature / curve_max_curvature, kind='linear', fill_value="extrapolate")
-    torsion = interp_tors_fun(np.linspace(0,1,length))
-    normalized_curvature = curvature / required_max_curvature
-    print("step 2/3 done")
-    #plot_space_curve(curve_repara)
+        # Normalize curvature for pulse sequence
+        curve_max_curvature = np.max(abs(curvature))
+        N2 = round(arc_array[-1]*curve_max_curvature / (required_max_curvature*tau))
+        curve_repara, arc_array, _, _ = reparametrize_and_calc_curvature_and_torsion(curve*curve_max_curvature / required_max_curvature, N2)
+        length = len(arc_array)
+
+        interp_curv_fun = interp1d(np.linspace(0,1,len(curvature)), curvature * required_max_curvature / curve_max_curvature, kind='linear', fill_value="extrapolate")
+        curvature = interp_curv_fun(np.linspace(0,1,length))
+        interp_tors_fun = interp1d(np.linspace(0,1,len(torsion)), torsion * required_max_curvature / curve_max_curvature, kind='linear', fill_value="extrapolate")
+        torsion = interp_tors_fun(np.linspace(0,1,length))
+        normalized_curvature = curvature / required_max_curvature
+        print("step 2/3 done")
+        #plot_space_curve(curve_repara)
+    elif (Version == 2):
+        diff_curve = np.diff(curve, axis=0)  # First derivatives of curve
+        arc_lengths = np.cumsum(np.linalg.norm(diff_curve, axis=1))
+        arc_lengths = np.insert(arc_lengths, 0, 0)  # Include the starting point (0 arc length)
+        curvature_org, torsion_org = calculate_curvature_and_torsion(curve)
+        window = max(5, (len(torsion_org) // 100) * 2 + 1)  # dynamic odd window size
+        torsion_org_smoothed = savgol_filter(torsion_org, window_length=window, polyorder=3)    
+        scaling = np.max(abs(curvature_org)) / required_max_curvature
+        N = round(arc_lengths[-1]*scaling/tau)
+        arc_array = np.linspace(0,arc_lengths[-1],N)
+        
+        #curvature_interp_func = interp1d(arc_lengths, curvature_org, kind='cubic', fill_value="extrapolate")
+        curvature_interp_func = PchipInterpolator(arc_lengths, curvature_org)
+        curvature = curvature_interp_func(arc_array)/scaling
+        eps = 1e-4
+        curvature = np.clip(curvature, eps, None)
+        normalized_curvature = curvature / required_max_curvature
+
+        torsion_interp_func = PchipInterpolator(arc_lengths, torsion_org_smoothed)
+        #torsion_interp_func = interp1d(arc_lengths, torsion_org, kind='cubic', fill_value="extrapolate")
+        torsion = torsion_interp_func(arc_array)/scaling
+
+        x_interp = interp1d(arc_lengths, curve[:,0], kind='linear', fill_value="extrapolate")
+        y_interp = interp1d(arc_lengths, curve[:,1], kind='linear', fill_value="extrapolate")
+        z_interp = interp1d(arc_lengths, curve[:,2], kind='linear', fill_value="extrapolate")
+        curve_repara = np.vstack((
+            x_interp(arc_array)*scaling,
+            y_interp(arc_array)*scaling,
+            z_interp(arc_array)*scaling
+        )).T
+
+        arc_array = arc_array*scaling
+    elif (Version == 3):
+        bool_integrated_torsion = 1
+        diff_curve = np.diff(curve, axis=0)  # First derivatives of curve
+        arc_lengths = np.cumsum(np.linalg.norm(diff_curve, axis=1))
+        arc_lengths = np.insert(arc_lengths, 0, 0)  # Include the starting point (0 arc length)
+        curvature_org, torsion_org = calculate_curvature_and_torsion(curve,1)    
+        scaling = np.max(abs(curvature_org)) / required_max_curvature
+        N = round(arc_lengths[-1]*scaling/tau)
+        arc_array = np.linspace(0,arc_lengths[-1],N)
+        
+        #curvature_interp_func = interp1d(arc_lengths, curvature_org, kind='cubic', fill_value="extrapolate")
+        curvature_interp_func = PchipInterpolator(arc_lengths, curvature_org)
+        curvature = curvature_interp_func(arc_array)/scaling
+        eps = 1e-4
+        curvature = np.clip(curvature, eps, None)
+        normalized_curvature = curvature / required_max_curvature
+
+        integrated_torsion_org = cumulative_trapezoid(torsion_org, arc_lengths, initial=0)
+        torsion_integrated_interp_func = PchipInterpolator(arc_lengths, integrated_torsion_org)
+        #torsion_interp_func = interp1d(arc_lengths, torsion_org, kind='cubic', fill_value="extrapolate")
+        integrated_torsion = torsion_integrated_interp_func(arc_array)
+        arc_array = arc_array*scaling
+        
+        x_interp = interp1d(arc_lengths, curve[:,0], kind='linear', fill_value="extrapolate")
+        y_interp = interp1d(arc_lengths, curve[:,1], kind='linear', fill_value="extrapolate")
+        z_interp = interp1d(arc_lengths, curve[:,2], kind='linear', fill_value="extrapolate")
+        curve_repara = np.vstack((
+            x_interp(arc_array)*scaling,
+            y_interp(arc_array)*scaling,
+            z_interp(arc_array)*scaling
+        )).T
+
 
     # Compute the integrated torsion (cumulative sum of torsion)
-    integrated_torsion = np.cumsum(torsion * np.diff(arc_array, prepend=arc_array[0]))  # Integrated torsion based on arc length
+    #integrated_torsion = np.cumsum(torsion * np.diff(arc_array, prepend=arc_array[0]))  # Integrated torsion based on arc length
+
+    if (bool_integrated_torsion == 0):
+        integrated_torsion = cumulative_trapezoid(torsion, arc_array, initial=0)
     
     #fig = plt.figure(figsize=(10, 8))
     #ax = fig.add_subplot()

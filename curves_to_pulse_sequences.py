@@ -77,10 +77,10 @@ def clelia_curve(m = 2, n = 3, T = 20, N = 1000, max_amplitude = 10000, tau = 0.
 
 def parity_curve_20(type = 1, N = 10000, max_amplitude = 10000, tau = 0.0000005, offset = 0, dir_path = "/Users/leon/Desktop/Physik/Glaser/Bachelor_Thesis/other_data/pulse_sequence_from_curve"):
     if (type == 1): #somehow doesnt work
-        t = np.linspace(0,40*np.pi, N)
-        x = 2000*np.sin(t/20)
-        y = 2000*np.sin(t/10)*np.cos(t/10)**2
-        z = 2000*np.sin(t/10)*np.cos(t/10)
+        t = np.linspace(0,4*np.pi, N)
+        x = np.sin(t/2)
+        y = np.sin(t)*np.cos(t)**2
+        z = np.sin(t)*np.cos(t)
         curve = np.vstack((x,y,z)).T
     elif (type == 2):
         t = np.linspace(0,2*np.pi, N)

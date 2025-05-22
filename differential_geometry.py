@@ -83,7 +83,7 @@ def reparametrize_by_arclength(curve, N):
 
     return curve_repara, arc_array
 
-def calculate_curvature_and_torsion(curve):
+def calculate_curvature_and_torsion(curve, Version = 1):
     """
     Calculates curvature kappa and torsion tau at all points in the curve 
     applying the Frenet Equations.
@@ -96,31 +96,50 @@ def calculate_curvature_and_torsion(curve):
     - tuple: Two numpy arrays, one for curvature (kappa) and one for torsion (tau).
     """
 
-    # Ensure the input is a numpy array
-    curve = np.asarray(curve)
-    if curve.shape[1] != 3:
-        raise ValueError("Input curve must be an mx3 numpy array.")
+    if (Version == 1):  #calculates by parametrizing by arclength
+        # Ensure the input is a numpy array
+        curve = np.asarray(curve)
+        if curve.shape[1] != 3:
+            raise ValueError("Input curve must be an mx3 numpy array.")
 
-    # Compute the arc length parametrization
-    diff_curve = np.diff(curve, axis=0)  # First derivatives of curve
-    arc_lengths = np.cumsum(np.linalg.norm(diff_curve, axis=1))
-    arc_lengths = np.insert(arc_lengths, 0, 0)  # Include the starting point (0 arc length)
+        # Compute the arc length parametrization
+        diff_curve = np.diff(curve, axis=0)  # First derivatives of curve
+        arc_lengths = np.cumsum(np.linalg.norm(diff_curve, axis=1))
+        arc_lengths = np.insert(arc_lengths, 0, 0)  # Include the starting point (0 arc length)
 
-    # Compute derivatives with respect to arc length
-    tangent = np.gradient(curve, arc_lengths, axis=0)  # Tangent vector
-    tangent_norms = np.linalg.norm(tangent, axis=1, keepdims=True)
-    tangent_unit = tangent / tangent_norms  # Unit tangent vector
+        # Compute derivatives with respect to arc length
+        tangent = np.gradient(curve, arc_lengths, axis=0)  # Tangent vector
+        tangent_norms = np.linalg.norm(tangent, axis=1, keepdims=True)
+        tangent_unit = tangent / tangent_norms  # Unit tangent vector
 
-    normal = np.gradient(tangent_unit, arc_lengths, axis=0)  # Normal vector
-    normal_norms = np.linalg.norm(normal, axis=1, keepdims=True)
-    normal_unit = normal / normal_norms  # Unit normal vector
+        normal = np.gradient(tangent_unit, arc_lengths, axis=0)  # Normal vector
+        normal_norms = np.linalg.norm(normal, axis=1, keepdims=True)
+        normal_unit = normal / normal_norms  # Unit normal vector
 
-    binormal = np.cross(tangent_unit, normal_unit)  # Binormal vector
+        binormal = np.cross(tangent_unit, normal_unit)  # Binormal vector
 
-    # Compute curvature (kappa) and torsion (tau)
-    curvature = np.linalg.norm(normal, axis=1)
-    torsion = -np.einsum('ij,ij->i', np.gradient(binormal, arc_lengths, axis=0), normal_unit)
+        # Compute curvature (kappa) and torsion (tau)
+        curvature = np.linalg.norm(normal, axis=1)
+        torsion = -np.einsum('ij,ij->i', np.gradient(binormal, arc_lengths, axis=0), normal_unit)
+    elif (Version ==  2):   #TODO doesnt work properly
+        curve = np.asarray(curve)
+        if curve.ndim != 2 or curve.shape[1] != 3:
+            raise ValueError("Input must be an (m x 3) array of 3D points.")
 
+        r_dot = np.gradient(curve, axis=0)
+        r_ddot = np.gradient(r_dot, axis=0)
+        r_dddot = np.gradient(r_ddot, axis=0)
+
+        cross = np.cross(r_dot, r_ddot)
+        cross_norm_sq = np.linalg.norm(cross, axis=1)**2 + 1e-10
+        r_dot_norm = np.linalg.norm(r_dot, axis=1)
+
+        # Curvature: |r' × r''| / |r'|^3
+        curvature = np.linalg.norm(cross, axis=1) / (r_dot_norm**3 + 1e-10)
+
+        # Torsion: scalar triple product / |r' × r''|^2
+        triple = np.einsum('ij,ij->i', np.cross(r_dot, r_ddot), r_dddot)
+        torsion = triple / cross_norm_sq
     return curvature, torsion
 
 def reparametrize_and_calc_curvature_and_torsion(curve, N):
@@ -166,10 +185,7 @@ def curve_from_curvature_and_torsion(kappa, tau, delta_s=0.01):        #TODO : t
     r = np.zeros(3, dtype=np.float64)  # Position vector (starts at the origin)
     
     # Integrate the curve
-    for i in range(num_points):
-        # Store the current position of the curve
-        curve[i, :] = r
-
+    for i in range(num_points-1):
         # Update vectors using the Frenet-Serret formulas
         dT = kappa[i] * N * delta_s
         dN = (-kappa[i] * T + tau[i] * B) * delta_s
@@ -187,6 +203,9 @@ def curve_from_curvature_and_torsion(kappa, tau, delta_s=0.01):        #TODO : t
 
         # Update the position along the curve by integrating the tangent
         r += T * delta_s  # Move in the direction of the tangent
+
+        # Store the current position of the curve
+        curve[i+1, :] = r
 
     return curve
 
@@ -368,7 +387,7 @@ def test_calculate_curvature_and_torsion():
     expected_torsion = k*expected_curvature
 
     # Calculate curvature and torsion
-    calculated_curvature, calculated_torsion = calculate_curvature_and_torsion(helix)
+    calculated_curvature, calculated_torsion = calculate_curvature_and_torsion(helix,2)
 
     # Plot the helix
     fig = plt.figure(figsize=(18, 6))
@@ -409,7 +428,7 @@ def test_curve_from_curvature_and_torsion(num_points=1000, r=1.0, c=0.1):
     tau = np.ones(num_points, dtype=np.float64) * (c / r)  # Torsion: c/r
 
     # Generate the helix curve
-    curve = curve_from_curvature_and_torsion(kappa, tau, num_points)
+    curve = curve_from_curvature_and_torsion(kappa, tau)
     # Plot the helix
     fig = plt.figure(figsize=(18, 6))
     ax = fig.add_subplot(131, projection='3d')
