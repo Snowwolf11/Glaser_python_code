@@ -9,7 +9,7 @@ from rotation_matrix_algorithm import *
 from differential_geometry import *
 from storing_saving_formatting import *
 
-def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  3):
+def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  2):
     """
     Calculate the pulse sequence with given max_amplitude and time_per_subpulse (tau) from space-curve and save the data in a new sub directory of dir_path
     Parameters:
@@ -22,6 +22,9 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  3)
     - works best for big m (smooth curves)
     """
     
+    #smoothing_window = max(5, (len(curve) // 20) * 2 + 1)
+    #curve = savgol_filter(curve, window_length=smoothing_window, polyorder=3, axis=0)
+
     bool_integrated_torsion = 0
     dir_path = get_next_subdirectory(dir_path)
     required_max_curvature = 2*np.pi*max_amplitude
@@ -64,7 +67,7 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  3)
         curvature = np.clip(curvature, eps, None)
         normalized_curvature = curvature / required_max_curvature
 
-        torsion_interp_func = PchipInterpolator(arc_lengths, torsion_org_smoothed)
+        torsion_interp_func = PchipInterpolator(arc_lengths, torsion_org)#_smoothed)
         #torsion_interp_func = interp1d(arc_lengths, torsion_org, kind='cubic', fill_value="extrapolate")
         torsion = torsion_interp_func(arc_array)/scaling
 

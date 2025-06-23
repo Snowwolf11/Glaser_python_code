@@ -139,6 +139,8 @@ def calculate_curvature_and_torsion(curve, Version = 1):
 
         # Torsion: scalar triple product / |r' × r''|^2
         triple = np.einsum('ij,ij->i', np.cross(r_dot, r_ddot), r_dddot)
+        eps = 1e-4
+        cross_norm_sq = np.clip(cross_norm_sq, eps, None)
         torsion = triple / cross_norm_sq
     return curvature, torsion
 
@@ -274,13 +276,17 @@ def compare_and_align_curves(curve_1, curve_2, plot = False):
     curve_1_scaled = curve_1_translated / scale_factor_1
     curve_2_scaled = curve_2_translated / scale_factor_2
 
-    # Step 4: Find the best fit rotation
+    # Step 4V1: Find the best fit rotation
     H = np.dot(curve_1_scaled.T, curve_2_scaled)
     U, _, Vt = np.linalg.svd(H)
     rotation_matrix = np.dot(U, Vt)
 
+    # Step 4V2: rotate initial frames to be equal
+    rotation_matrix_V2 = compute_initial_frame_rotation(curve_1_scaled, curve_2_scaled)
+
     # Apply the rotation to curve_2
     curve_2_rotated = np.dot(curve_2_scaled, rotation_matrix.T)
+    curve_2_rotated_V2 = np.dot(curve_2_scaled, rotation_matrix_V2.T)
 
     # Step 5: Calculate the similarity score (RMSD: Root Mean Squared Distance)
     rmsd = np.sqrt(np.mean(np.sum((curve_1_scaled - curve_2_rotated)**2, axis=1)))
@@ -297,12 +303,93 @@ def compare_and_align_curves(curve_1, curve_2, plot = False):
         ax.set_ylabel('Y')
         ax.set_zlabel('Z')
         ax.legend()
-        ax.set_title('Comparison of Curves After Translation, Scaling, and Rotation')
+        ax.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Least Squared Error)')
+
+        plt.show()
+
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        ax.plot(curve_1_scaled[:, 0], curve_1_scaled[:, 1], curve_1_scaled[:, 2], label='Curve 1 (Initial)', color='blue')
+        ax.plot(curve_2_rotated_V2[:, 0], curve_2_rotated_V2[:, 1], curve_2_rotated_V2[:, 2], label='Curve 2 (Aligned)', color='red')
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.legend()
+        ax.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Initial Frenet Frames)')
 
         plt.show()
 
     # Step 7: Return the final curves and similarity score
     return curve_1_scaled, curve_2_rotated, rmsd
+
+def compute_initial_frame_rotation(curve_1, curve_2, epsilon=1e-6):
+    """
+    Compute a rotation matrix that aligns the initial Frenet frame of curve_1 to that of curve_2.
+    Falls back to aligning only tangents if curvature is near zero.
+    Uses user-defined `rotation_matrix(axis, angle)` function.
+    
+    Parameters:
+        curve_1: (N x 3) numpy array
+        curve_2: (N x 3) numpy array
+        epsilon: threshold to detect degenerate frames
+    
+    Returns:
+        rotation_matrix: (3 x 3) numpy array
+    """
+    def get_frenet_frame(curve):
+        # Tangent vector
+        t = curve[1] - curve[0]
+        t /= np.linalg.norm(t)
+
+        # Approximate normal vector
+        v1 = curve[1] - curve[0]
+        v2 = curve[2] - curve[1]
+        dv = v2 - v1
+        n = dv - np.dot(dv, t) * t
+
+        norm_n = np.linalg.norm(n)
+        if norm_n < epsilon:
+            return t, None, None  # Flat segment, no usable normal
+
+        n /= norm_n
+        b = np.cross(t, n)
+        return t, n, b
+
+    def align_vectors(v1, v2):
+        v1 = v1 / np.linalg.norm(v1)
+        v2 = v2 / np.linalg.norm(v2)
+        cross = np.cross(v1, v2)
+        dot = np.dot(v1, v2)
+
+        if np.allclose(cross, 0):
+            if dot > 0:
+                return np.eye(3)
+            else:
+                # 180° rotation around any perpendicular axis
+                orth = np.eye(3)[np.argmin(np.abs(v1))]
+                axis = np.cross(v1, orth)
+                axis /= np.linalg.norm(axis)
+                return rotation_matrix(axis, np.pi)
+
+        angle = np.arccos(np.clip(dot, -1.0, 1.0))
+        axis = cross / np.linalg.norm(cross)
+        return rotation_matrix(axis, angle)
+
+    # Step 1: Get local Frenet frames
+    t1, n1, b1 = get_frenet_frame(curve_1)
+    t2, n2, b2 = get_frenet_frame(curve_2)
+
+    # Step 2: Decide on alignment strategy
+    if n1 is None or n2 is None:
+        # Only tangent info available
+        return align_vectors(t1, t2)
+
+    # Step 3: Construct rotation from full frame
+    frame1 = np.column_stack((t1, n1, b1))
+    frame2 = np.column_stack((t2, -n2, -b2))
+    return frame2 @ frame1.T
 
 def generate_helical_curve(num_points, radius=1, pitch=1):
     """
@@ -322,10 +409,66 @@ def generate_helical_curve(num_points, radius=1, pitch=1):
     z = pitch * t / (2 * np.pi)
     return np.vstack((x, y, z)).T
 
+def arc_between(p0, v0, p1, v1, num_points=100, tolerance=1e-6):        #TODO: not sure if works properly
+    """
+    Constructs a circular arc connecting p0 to p1 with tangents v0 and v1.
+    Returns sampled points on the arc.
+    If the input geometry is not coplanar, returns None and prints a warning.
+    """
+
+    # Normalize input directions
+    v0 = v0 / np.linalg.norm(v0)
+    v1 = v1 / np.linalg.norm(v1)
+    chord = p1 - p0
+    chord_len = np.linalg.norm(chord)
+
+    # Check coplanarity: points and tangents must lie in the same plane
+    normal = np.cross(v0, v1)
+    if np.linalg.norm(normal) < 1e-10:
+        # v0 and v1 are parallel → trivial case
+        return np.linspace(p0, p1, num_points)
+
+    normal /= np.linalg.norm(normal)
+
+    # Test if p1 lies in the plane defined by (p0, v0, v1)
+    to_p1 = p1 - p0
+    distance_to_plane = np.dot(to_p1, normal)
+    if abs(distance_to_plane) > tolerance:
+        print("Warning: Input points and tangents are not coplanar. Cannot construct a circular arc.")
+        return None
+
+    # Midpoint and direction along the chord
+    m = (p0 + p1) / 2
+    u = chord / chord_len
+
+    # Angle between tangents
+    angle = np.arccos(np.clip(np.dot(v0, v1), -1, 1))
+    radius = chord_len / (2 * np.sin(angle / 2))
+
+    # Circle center lies in plane perpendicular to chord, offset from midpoint
+    offset_dir = np.cross(normal, u)
+    center = m + np.sqrt(radius**2 - (chord_len / 2)**2) * offset_dir
+
+    # Orthonormal basis for the arc plane
+    e1 = (p0 - center) / np.linalg.norm(p0 - center)
+    e2 = np.cross(normal, e1)
+
+    # Compute angle range for the arc
+    def point(theta): return center + radius * (np.cos(theta) * e1 + np.sin(theta) * e2)
+
+    end_vec = (p1 - center)
+    theta0 = 0
+    theta1 = np.arctan2(np.dot(end_vec, e2), np.dot(end_vec, e1))
+
+    # Ensure arc proceeds in the correct direction
+    if np.dot(np.cross(e1, end_vec), normal) < 0:
+        theta1 += 2 * np.pi if theta1 < 0 else -2 * np.pi
+
+    theta = np.linspace(theta0, theta1, num_points)
+    return np.array([point(t) for t in theta])
 
 
-
-
+############################################################################################################
 # tests
 def test_reparametrize_by_arclength():  
     t_array = np.linspace(0,2*np.pi*4,1000)
@@ -463,12 +606,33 @@ def test_compare_and_align_curves():
     curve_1_final, curve_3_final, similarity_score_diff = compare_and_align_curves(curve_1, curve_3, plot=True)
     print(f"Similarity Score (RMSD) for different curves: {similarity_score_diff}")
 
+def test_arc_between():
+    p0 = np.array([1, 0.3, 0])
+    v0 = np.array([-2, 0.5, 0])
+    p1 = np.array([1, -1, 0])
+    v1 = np.array([0.521, 1, 0])
+
+    arc = arc_between(p0, v0, p1, v1)
+
+    # Plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(arc[:, 0], arc[:, 1], arc[:, 2], label='Circular Arc')
+    ax.quiver(*p0, *v0, color='green', label='v0')
+    ax.quiver(*p1, *v1, color='red', label='v1')
+    ax.scatter(*p0, color='green')
+    ax.scatter(*p1, color='red')
+    ax.legend()
+    plt.title("Smooth Circular Arc Interpolation")
+    plt.show()
+
 
 #test_reparametrize_by_arclength()
 #test_calculate_curvature_and_torsion()
 #test_curve_from_curvature_and_torsion()
 #test_reparametrize_and_calc_curvature_and_torsion()
 #test_compare_and_align_curves()
+#test_arc_between()
 
 """
 N: 100, curve_length: 1000, time: 0.005784034729003906

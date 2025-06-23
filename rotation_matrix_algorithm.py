@@ -28,13 +28,17 @@ def calculate_space_curve(B1_amplitudes, phases, offset, max_Rabi_frequency, tau
 
     # Step 1: Calculate R0^{(k)} for k = 1,…,N
     for k in range(N):
-        Rabi_frequency = max_Rabi_frequency * B1_amplitudes[k]/100
-        Omega_dash = np.sqrt(Rabi_frequency**2 + offset**2)
-        B_eff = np.array([Rabi_frequency * np.cos(phases[k]),
+        if(B1_amplitudes[k] > 0):
+            Rabi_frequency = max_Rabi_frequency * B1_amplitudes[k]/100
+            Omega_dash = np.sqrt(Rabi_frequency**2 + offset**2)
+            B_eff = np.array([Rabi_frequency * np.cos(phases[k]),
                          Rabi_frequency * np.sin(phases[k]),
                          offset])
-        axis = B_eff/Omega_dash
-        angle = Omega_dash * tau
+            axis = B_eff/Omega_dash
+            angle = Omega_dash * tau
+        else: 
+            axis = np.array([1,0,0])
+            angle = 0
         R0.append(rotation_matrix(axis, angle))
     
     # Step 2: Calculate R_k := R_0^{(k)} ... R_0^{(0)} for k = 1,...,N
@@ -131,11 +135,17 @@ tau = 1/12  #sub-pulse duration in sec
 space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)
 plot_space_curve(space_curve)
 
-
 pulse_sequence = getPulseSequence('/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/UR_Pulse/UR36020kHz_30B1_rf10kHz/pulse1500.bruker')
-offset = 12000 # offset \nu_{off} in kHz
+offset = 0 # offset \nu_{off} in kHz
 max_Rabi_frequency = 10000  # max_Rabi_frequency \nu_{max} in kHz
 tau = 0.0000005 #sub-pulse duration in sec
 space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)
 plot_space_curve(space_curve)
-#"""
+
+pulse_sequence = getPulseSequence('/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/testSequences/new_test/test_3.bruker')
+offset = 0# offset \nu_{off} in kHz
+max_Rabi_frequency = 10000  # max_Rabi_frequency \nu_{max} in kHz
+tau = 0.0000005 #sub-pulse duration in sec
+space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)
+plot_space_curve(space_curve)
+"""
