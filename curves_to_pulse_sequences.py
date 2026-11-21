@@ -151,7 +151,7 @@ def circle_straight_circle(N=1000,
     test_curve(curve, max_amplitude, tau, offset, dir_path)
 
 
-def parity_curve_20(type = 1, N = 10000, max_amplitude = 10000, tau = 0.0000005, offset = 0, dir_path = "/Users/leon/Desktop/Physik/Glaser/Bachelor_Thesis/other_data/pulse_sequence_from_curve"):
+def parity_curve_20(type = 2, N = 10000, max_amplitude = 10000, tau = 0.0000005, offset = 0, dir_path = "/Users/leon/Desktop/Physik/Glaser/Bachelor_Thesis/other_data/pulse_sequence_from_curve"):
     if (type == 1): #somehow doesnt work
         t = np.linspace(0,4*np.pi, N)
         x = np.sin(t/2)
@@ -188,13 +188,13 @@ def PS2curve2PS(PS, max_amplitude = 10000, tau = 0.0000005, offset = 0, dir_path
 
 
 
-#lissajous_knot()
+#lissajous_knot() #0.329 0.0282
 #helix()
-#clelia_curve()
-#parity_curve_20()
+#clelia_curve() #0.72787 0.040263 0.003176
+parity_curve_20()
 #test_zero_curvature_curve()
 #helix_straight_helix()
-PS2curve2PS("/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/UR_Pulse/UR36020kHz_30B1_rf10kHz/pulse1060.bruker")
+#PS2curve2PS("/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/UR_Pulse/UR36020kHz_30B1_rf10kHz/pulse1060.bruker") #0.012 0.0047470
 
 
 #'/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/testSequences/new_test/test_3.bruker'

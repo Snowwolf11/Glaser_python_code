@@ -109,8 +109,18 @@ def plot_space_curve(curve, new_figure = True, new_axes = True, show = True):
         plt.show()
 
 
-
 """
+pulse_sequence = np.array([
+        [100,   180],
+        [100,  270],
+        [100,   180],
+    ])
+offset = 0 # offset \nu_{off} in kHz
+max_Rabi_frequency = 10000  # max_Rabi_frequency \nu_{max} in kHz
+tau = 25*1e-6  #sub-pulse duration in sec
+space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)*1e6
+plot_space_curve(space_curve)
+
 # Example usage(900◦x900◦y900◦x sequence):
 pulse_sequence = np.array([[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0]])
 offset = 0 # offset \nu_{off} in kHz
@@ -146,6 +156,93 @@ pulse_sequence = getPulseSequence('/Users/leon/Desktop/Physik/Glaser/Analyse_und
 offset = 0# offset \nu_{off} in kHz
 max_Rabi_frequency = 10000  # max_Rabi_frequency \nu_{max} in kHz
 tau = 0.0000005 #sub-pulse duration in sec
+space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)
+plot_space_curve(space_curve)
+"""
+"""
+import numpy as np
+import re
+import os
+
+def _parse_number(s, key):
+    # Accept decimals and scientific notation
+    m = re.search(rf"{key}\s*=\s*([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)", s)
+    return float(m.group(1)) if m else None
+
+def load_pulse_and_params(path_csv="pulses_type1.csv", path_npy=None):
+    
+    Loads the N×2 pulse table (kHz, deg) and parses max_Rabi_frequency (kHz) and tau (s)
+    from the CSV header. Works whether the header is commented or not.
+    If CSV not found, falls back to .npy for the pulse table (but params must be provided or inferred).
+
+    if os.path.isfile(path_csv):
+        # Read the first non-empty line as header (commented or not)
+        with open(path_csv, "r") as f:
+            header = ""
+            first_data_pos = 0
+            while True:
+                pos = f.tell()
+                line = f.readline()
+                if not line:  # EOF
+                    break
+                if line.strip() == "":
+                    continue
+                header = line.strip().lstrip("#").strip()
+                first_data_pos = f.tell()  # position after header line
+                break
+
+        if not header or "Amplitude_kHz" not in header:
+            raise ValueError("CSV header not found or not in expected format.")
+
+        # Parse amax_kHz and dt_us; if dt_us missing, try to compute from N and total_T_us
+        amax_kHz = _parse_number(header, "amax_kHz")
+        dt_us = _parse_number(header, "dt_us")
+        N_hdr = _parse_number(header, r"\bN\b")
+        Ttot_us = _parse_number(header, "total_T_us")
+
+        if dt_us is None and (N_hdr is not None and Ttot_us is not None):
+            dt_us = Ttot_us / N_hdr
+
+        if amax_kHz is None or dt_us is None:
+            raise ValueError(f"Could not parse amax_kHz or dt_us from header: {header}")
+
+        # Load numeric table: skip exactly one header line (commented or not)
+        pulse_sequence = np.loadtxt(path_csv, delimiter=",", skiprows=1)
+
+        max_Rabi_frequency = float(amax_kHz)            # kHz
+        tau = float(dt_us) * 1e-6                       # seconds
+        return pulse_sequence, max_Rabi_frequency, tau
+
+    # Fallback to NPY for data; you’ll need params from elsewhere if CSV missing
+    if path_npy and os.path.isfile(path_npy):
+        pulse_sequence = np.load(path_npy)
+        raise ValueError("Loaded pulses from .npy, but need amax_kHz and dt_us (not stored in .npy). "
+                         "Please provide them manually or load from the CSV instead.")
+    raise FileNotFoundError("Neither CSV nor NPY pulse files were found.")
+
+# ---- Use it ----
+# Replace your hardcoded block with:
+pulse_sequence, max_Rabi_frequency, tau = load_pulse_and_params(
+    path_csv="/Users/leon/Desktop/Physik/Glaser/Glaser_python_code/Qurveros_scripts/pulses_type2.csv",  # change if needed
+    path_npy="/Users/leon/Desktop/Physik/Glaser/Glaser_python_code/Qurveros_scripts/pulses_type2.npy"
+)
+
+offset = 0  # kHz
+
+space_curve = calculate_space_curve(
+    pulse_sequence[:, 0],  # amplitude [kHz]
+    pulse_sequence[:, 1],  # phase [deg]
+    offset,
+    max_Rabi_frequency,    # kHz (parsed from header: amax_kHz)
+    tau                    # seconds (parsed from header: dt_us → s)
+)
+plot_space_curve(space_curve)
+
+
+pulse_sequence = getPulseSequence('/Users/leon/Desktop/Physik/Glaser/Analyse_und_Visualisierung_von_robusten_Kontrollpulsen/Pulssequenzen/Leo_Van_Damme_optimized/RobustPiPulses/R180_OffsetOrder5.bruker')
+offset = 0# offset \nu_{off} in kHz
+max_Rabi_frequency = 1  # max_Rabi_frequency \nu_{max} in Hz
+tau = 0.005 #sub-pulse duration in sec
 space_curve = calculate_space_curve(pulse_sequence[:,0], pulse_sequence[:,1], offset, max_Rabi_frequency, tau)
 plot_space_curve(space_curve)
 """

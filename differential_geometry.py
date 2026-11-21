@@ -2,7 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial import ConvexHull
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, splprep, splev
+from scipy.integrate import quad
+from scipy.optimize import root_scalar
 import time
 
 from rotation_matrix_algorithm import rotation_matrix
@@ -143,6 +145,41 @@ def calculate_curvature_and_torsion(curve, Version = 1):
         cross_norm_sq = np.clip(cross_norm_sq, eps, None)
         torsion = triple / cross_norm_sq
     return curvature, torsion
+
+def resample_curve_b_spline(curve, N, lut_resolution=5000):
+    """
+    Reparameterize a 3D curve to equal arc-length spacing using B-spline fitting and LUT-based inversion.
+
+    Parameters:
+        curve : (M x 3) ndarray — input 3D curve
+        N : int — number of points to resample
+        lut_resolution : int — number of samples for arc-length LUT
+
+    Returns:
+        (N x 3) ndarray — reparameterized curve with equal arc-length spacing
+    """
+    # Fit B-spline to the curve
+    tck, u = splprep(curve.T, s=0)
+
+    # Step 1: Sample the curve finely
+    u_fine = np.linspace(0, 1, lut_resolution)
+    points_fine = np.column_stack(splev(u_fine, tck))
+    diffs = np.diff(points_fine, axis=0)
+    dists = np.linalg.norm(diffs, axis=1)
+
+    # Step 2: Build arc length LUT
+    arc_lengths = np.insert(np.cumsum(dists), 0, 0)
+    total_arc = arc_lengths[-1]
+    s_to_u = interp1d(arc_lengths, u_fine, kind='linear')
+
+    # Step 3: Get new arc positions and map back to u
+    s_target = np.linspace(0, total_arc, N)
+    u_target = s_to_u(s_target)
+
+    # Step 4: Evaluate B-spline at new u values
+    x_new, y_new, z_new = splev(u_target, tck)
+    return np.column_stack((x_new, y_new, z_new))
+
 
 def reparametrize_and_calc_curvature_and_torsion(curve, N):
     """reparametrizes by arc_length and calculated curvature and torsion
@@ -293,34 +330,58 @@ def compare_and_align_curves(curve_1, curve_2, plot = False):
 
     if plot:
         # Step 6: Plot both curves for comparison
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        fig1 = plt.figure(figsize=(10, 8))
+        axC1 = fig1.add_subplot(111, projection='3d')
+        axC1.plot(curve_1_scaled[:, 0], curve_1_scaled[:, 1], curve_1_scaled[:, 2], label='Curve 1 (Final)', color='blue')
+        axC1.plot(curve_2_rotated[:, 0], curve_2_rotated[:, 1], curve_2_rotated[:, 2], label='Curve 2 (Aligned)', color='red')
+        axC1.set_xlabel('X')
+        axC1.set_ylabel('Y')
+        axC1.set_zlabel('Z')
+        axC1.legend()
+        axC1.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Least Squared Error)')
+        plt.show(block=False)
 
-        ax.plot(curve_1_scaled[:, 0], curve_1_scaled[:, 1], curve_1_scaled[:, 2], label='Curve 1 (Final)', color='blue')
-        ax.plot(curve_2_rotated[:, 0], curve_2_rotated[:, 1], curve_2_rotated[:, 2], label='Curve 2 (Aligned)', color='red')
+        fig2 = plt.figure(figsize=(10, 8))
+        axC2 = fig2.add_subplot(111, projection='3d')
+        axC2.plot(curve_1_scaled[:, 0], curve_1_scaled[:, 1], curve_1_scaled[:, 2], label='Curve 1 (Initial)', color='blue')
+        axC2.plot(curve_2_rotated_V2[:, 0], curve_2_rotated_V2[:, 1], curve_2_rotated_V2[:, 2], label='Curve 2 (Aligned)', color='red')
+        axC2.set_xlabel('X')
+        axC2.set_ylabel('Y')
+        axC2.set_zlabel('Z')
+        axC2.legend()
+        axC2.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Initial Frenet Frames)')
+        plt.show(block=False)
 
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
+        fig3 = plt.figure(figsize=(10, 8))
+        ax = fig3.add_subplot(111)
+        ax.plot(np.linspace(0,100,len(curve_1_scaled[:, 1])), np.linalg.norm(curve_1_scaled-curve_2_rotated_V2, axis=1), label='Curve 1 (Initial)', color='blue')   
+        ax.set_xlabel('arclenth in %')
+        ax.set_ylabel('distance between curves')
         ax.legend()
-        ax.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Least Squared Error)')
+        ax.set_title('Curves distance along curve')
+        plt.show(block=False)
 
-        plt.show()
+        [curvat_1, tors_1] = calculate_curvature_and_torsion(curve_1_scaled, Version = 1)
+        fig4 = plt.figure(figsize=(10, 8))
+        ax1 = fig4.add_subplot(111)
+        ax1.plot(np.linspace(0,100,len(curvat_1)), curvat_1, label='curvature', color='blue')   
+        ax1.set_xlabel('arclenth in %')
+        ax1.set_ylabel('Curvature')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax1.legend()
+        ax1.set_title("Curvature/torsion of Initial Curve")
+        ax2 = ax1.twinx()
+        ax2.plot(np.linspace(0,100,len(tors_1)), tors_1, label='torsion', color='red')   
+        ax2.set_ylabel('torsion')
+        ax2.tick_params(axis='y', labelcolor='red')
+        ax2.legend()
+        fig4.tight_layout()
+        plt.show(block=False)
 
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-
-        ax.plot(curve_1_scaled[:, 0], curve_1_scaled[:, 1], curve_1_scaled[:, 2], label='Curve 1 (Initial)', color='blue')
-        ax.plot(curve_2_rotated_V2[:, 0], curve_2_rotated_V2[:, 1], curve_2_rotated_V2[:, 2], label='Curve 2 (Aligned)', color='red')
-
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.legend()
-        ax.set_title('Comparison of Curves After Translation, Scaling, and Rotation (Initial Frenet Frames)')
-
-        plt.show()
-
+        plt.pause(0.1)
+        input("Press Enter to close all plots...")
+        plt.close('all')
+        
     # Step 7: Return the final curves and similarity score
     return curve_1_scaled, curve_2_rotated, rmsd
 

@@ -20,6 +20,10 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  2)
     Output:
     - pulse sequence (np.array): A pulse sequence as n x 2 array (1. column: percentage of max_amp, 2. column: phase)
     - works best for big m (smooth curves)
+
+    Versions:
+    1-3: different versions of calculating PS from curvature and torsion (2 recommended)
+    4: Inverse rotaion matrix method (calculates rotation matricews from curve and the gets PS from rotation angle and axes)
     """
     
     #smoothing_window = max(5, (len(curve) // 20) * 2 + 1)
@@ -112,12 +116,54 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  2)
             y_interp(arc_array)*scaling,
             z_interp(arc_array)*scaling
         )).T
+    elif(Version == 4): #rotation matrix method
+        #reparametrize curve by acrlength in the appropriate number N of steps, so that the maximum amplitude is correct
+        diff_curve = np.diff(curve, axis=0)  # First derivatives of curve
+        arc_lengths = np.cumsum(np.linalg.norm(diff_curve, axis=1))
+        arc_lengths = np.insert(arc_lengths, 0, 0)  # Include the starting point (0 arc length)
+        curvature_org, torsion_org = calculate_curvature_and_torsion(curve)
+        scaling = np.max(abs(curvature_org)) / required_max_curvature
+        N = round(arc_lengths[-1]*scaling/tau)
+        curve_repara = resample_curve_b_spline(curve, N)*scaling
+        
+        #From reparametrized curve reverse the rotation matrix algorithm to calculate the pulse sequence
+        diff_curve_repara = np.diff(curve_repara, axis=0)  # First derivatives of curve
+        if(max(np.linalg.norm(diff_curve_repara, axis = 1)) - min(np.linalg.norm(diff_curve_repara, axis = 1)) > min(np.linalg.norm(diff_curve_repara, axis = 1))*1e-3):
+            raise ValueError("tangents dont have equal length")
+        print(f"Abweichung in %:  {100*(max(np.linalg.norm(diff_curve_repara, axis = 1)) - min(np.linalg.norm(diff_curve_repara, axis = 1)))/min(np.linalg.norm(diff_curve_repara, axis = 1))}")
+        diff_curve_repara = diff_curve_repara/np.mean(np.linalg.norm(diff_curve_repara, axis = 1))
+        initial_vec = diff_curve_repara[0,:].T / np.linalg.norm(diff_curve_repara[0,:])
+        rotation_angles = []
+        rotation_axes = []
+        total_rotation_matrix = np.eye(3)
+        #TODO doesnt quite work yet!!
+        for i in range(len(diff_curve_repara)-1):
+            rotated_vec = total_rotation_matrix@diff_curve_repara[i+1,:].T / np.linalg.norm(total_rotation_matrix@diff_curve_repara[i+1,:].T)
+            rotation_angle = np.arccos(np.dot(initial_vec, rotated_vec))
+            rotation_axis = np.cross(initial_vec, rotated_vec)/np.linalg.norm(np.cross(initial_vec, rotated_vec))
+            if(any(np.isnan(rotation_axis))):
+                rotation_axis = diff_curve_repara[i,:].T
+            rotation_matrix_i = rotation_matrix(rotation_axis, rotation_angle)
+            total_rotation_matrix = rotation_matrix_i.T@total_rotation_matrix
+            rotation_angles.append(rotation_angle)
+            rotation_axes.append(rotation_axis)
+
+        B1_amplitudes = []
+        phases = []
+        initial_x_axis = np.cross(initial_vec, np.array([0.89343489,-1.23304,123*np.pi/1342]).T)/np.linalg.norm(np.cross(initial_vec, np.array([0.89343489,-1.23304,123*np.pi/1342]).T))
+        for i in range(len(rotation_angles)):
+            B1_amplitude = 100*(rotation_angles[i]/(tau*2*np.pi))/max_amplitude
+            phase = np.arccos(np.dot(initial_x_axis,rotation_axes[i]))*180/np.pi
+            B1_amplitudes.append(B1_amplitude)
+            phases.append(phase)
+
+        pulse_sequence = np.column_stack((B1_amplitudes, phases))
 
 
     # Compute the integrated torsion (cumulative sum of torsion)
     #integrated_torsion = np.cumsum(torsion * np.diff(arc_array, prepend=arc_array[0]))  # Integrated torsion based on arc length
 
-    if (bool_integrated_torsion == 0):
+    if (bool_integrated_torsion == 0 and (Version == 1 or Version == 2 or Version == 3)):
         integrated_torsion = cumulative_trapezoid(torsion, arc_array, initial=0)
     
     #fig = plt.figure(figsize=(10, 8))
@@ -129,7 +175,8 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  2)
     #plt.show()
 
     # Create pulse sequence with normalized curvature and integrated torsion
-    pulse_sequence = np.column_stack((100*normalized_curvature, integrated_torsion*180/np.pi))
+    if(Version == 1 or Version == 2 or Version == 3):
+        pulse_sequence = np.column_stack((100*normalized_curvature, integrated_torsion*180/np.pi))
 
     x = curve_repara[:,0]
     y = curve_repara[:,1]
@@ -149,7 +196,7 @@ def pulse_sequence_from_curve(curve, max_amplitude, tau, dir_path, Version =  2)
     with open(params_path, 'w') as f:
         f.write(f"Maximum amplitude: {max_amplitude} kHz\n")
         f.write(f"Time per subpulse: {tau} s\n")
-        f.write(f"Number of subpulses: {len(normalized_curvature)}\n")
+        f.write(f"Number of subpulses: {len(pulse_sequence)}\n")
         f.write(f"Pulse flip angle: {flip_angle}°\n")
         f.write(f"distance of curve ends:\n")
         f.write(f"x distance of curve ends: {abs(curve_repara[-1,0] - curve_repara[0,0])} s\n")

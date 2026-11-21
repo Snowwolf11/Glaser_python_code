@@ -27,3 +27,9 @@ build/
 
 # Jupyter Notebook checkpoints (if you use notebooks)
 .ipynb_checkpoints/
+
+# other stuff
+personal_code/
+
+# Qurveros virtual environment
+Qurveros_scripts/qurveros_venv/
