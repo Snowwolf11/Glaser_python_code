@@ -50,12 +50,13 @@ def calculate_space_curve(B1_amplitudes, phases, offset, max_Rabi_frequency, tau
     e_z = np.array([0, 0, 1])
     r_dot = [np.dot(R.T, e_z) for R in R_k]
    
-    # Step 4: Calculate r_k = sum(r_dot_{k-1} * tau) for k = 1,...,N+1
-    r_values = [np.zeros(3)]  # Start with r_0 = 0
-    for k in range(1, N+2):
-        r_values.append(r_values[-1] + r_dot[k-1] * tau)
-    
-    return np.array(r_values)
+    # Step 4: Trapezoid rule over the N sub-pulse intervals: r_0 = 0,
+    # r_k = r_{k-1} + (r_dot_{k-1} + r_dot_k)/2 * tau for k = 1,...,N  ->  N+1 points
+    r_dot = np.array(r_dot)
+    r_values = np.zeros((N + 1, 3))
+    np.cumsum((r_dot[:-1] + r_dot[1:]) / 2 * tau, axis=0, out=r_values[1:])
+
+    return r_values
 
 def plot_space_curve(curve, new_figure = True, new_axes = True, show = True):
     if new_figure:
